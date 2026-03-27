@@ -1,12 +1,23 @@
-FROM node:20-alpine
+# Stage 1: Build
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 
 COPY . .
+RUN npm run build -- --configuration=production
 
-EXPOSE 5173
+# Stage 2: Serve
+FROM nginx:alpine
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built app
+COPY --from=builder /app/dist/hire-genius-frontend/browser /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
