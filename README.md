@@ -6,31 +6,30 @@ HireGenius is an intelligent HR candidate management platform that automates CV 
 
 ## Key Features
 
-- **Automated CV Ingestion** — Monitors configured Google Drive folders and syncs new CVs on a schedule (Celery Beat).
+- **Automated CV Ingestion** — Monitors configured Google Drive folders and syncs new CVs on a schedule.
 - **AI-Powered Evaluation** — Uses Anthropic Claude to parse CVs and score candidates against vacancy requirements, values alignment, experience relevance, and stability.
 - **Candidate Pipeline** — Tracks every candidate through statuses: `en_proceso`, `contratado`, `no_apto`, `en_espera`, `descartado`.
 - **Contact Management** — Logs outreach via email, WhatsApp, or phone with configurable message templates.
 - **Interview Feedback** — Structured post-interview ratings with hire/reject recommendations.
 - **Google Calendar Integration** — Proposes and schedules interview meetings directly from the platform.
 - **AWS S3 Storage** — Stores parsed CV files securely with presigned download URLs.
-- **REST API** — FastAPI backend with full OpenAPI/Swagger documentation.
-- **React Frontend** — Modern Vite + TypeScript + Tailwind CSS dashboard.
+- **REST API** — ASP.NET Core backend with full Swagger/OpenAPI documentation.
+- **Angular Frontend** — Modern Angular 17 dashboard with reactive UI.
 
 ---
 
 ## Tech Stack
 
-| Layer       | Technology                          |
-|-------------|-------------------------------------|
-| Backend     | Python 3.11, FastAPI, SQLAlchemy    |
-| Task Queue  | Celery + Redis                      |
-| Database    | MySQL 8.0                           |
-| AI          | Anthropic Claude (claude-3-5-sonnet)|
-| Storage     | AWS S3                              |
-| Auth / Drive| Google OAuth2, Google Drive API     |
-| Calendar    | Google Calendar API                 |
-| Frontend    | React 18, Vite, TypeScript, Tailwind|
-| Container   | Docker, Docker Compose              |
+| Layer       | Technology                              |
+|-------------|-----------------------------------------|
+| Backend     | .NET 8, C#, ASP.NET Core Web API        |
+| Database    | MySQL 8.0                               |
+| AI          | Anthropic Claude (claude-opus-4-6)      |
+| Storage     | AWS S3                                  |
+| Auth / Drive| Google OAuth2, Google Drive API         |
+| Calendar    | Google Calendar API                     |
+| Frontend    | Angular 17, TypeScript                  |
+| Container   | Docker, Docker Compose                  |
 
 ---
 
@@ -61,11 +60,10 @@ cd hire-genius
 cp .env.example .env
 ```
 
-Open `.env` and fill in all required values (see comments in the file). At minimum you need:
+Open `.env` and fill in all required values. At minimum you need:
 - `ANTHROPIC_API_KEY`
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `S3_BUCKET_NAME`
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
-- `SECRET_KEY` (generate with `openssl rand -hex 32`)
 
 ### 3. Set up Google Cloud project
 
@@ -77,23 +75,15 @@ Follow the [Google Drive Setup](#google-drive-setup) section below to obtain OAu
 docker-compose up --build
 ```
 
-This starts: MySQL, Redis, FastAPI backend, Celery worker, Celery Beat scheduler, and the React frontend.
+This starts: MySQL, the ASP.NET Core backend, and the Angular frontend (served via Nginx).
 
-### 5. Run database migrations
+### 5. Access the platform
 
-Once the containers are running:
-
-```bash
-docker exec hire_genius_backend alembic upgrade head
-```
-
-### 6. Access the platform
-
-| Service        | URL                              |
-|----------------|----------------------------------|
-| Frontend App   | http://localhost:5173            |
-| API Docs       | http://localhost:8000/docs       |
-| ReDoc          | http://localhost:8000/redoc      |
+| Service      | URL                                   |
+|--------------|---------------------------------------|
+| Frontend App | http://localhost:4200                 |
+| API Docs     | http://localhost:5000/swagger         |
+| Backend API  | http://localhost:5000/api             |
 
 ---
 
@@ -105,19 +95,18 @@ docker exec hire_genius_backend alembic upgrade head
    - **Google Calendar API**
 3. Go to **APIs & Services > Credentials** and create an **OAuth 2.0 Client ID**:
    - Application type: **Web application**
-   - Authorized redirect URIs: `http://localhost:8000/api/gdrive/auth-callback`
+   - Authorized redirect URIs: `http://localhost:5000/api/gdrive/auth-callback`
 4. Download the client credentials and copy the **Client ID** and **Client Secret** into your `.env` file.
 5. In the HireGenius frontend, navigate to **Settings > Google Drive** and click **Connect Google Account** to authorize access.
-6. Add one or more Google Drive folders to monitor. The Celery Beat scheduler will sync them every `GDRIVE_SYNC_INTERVAL_MINUTES` minutes (default: 30).
+6. Add one or more Google Drive folders to monitor. The background service will sync them periodically.
 
 ---
 
 ## API Documentation
 
-The FastAPI backend auto-generates interactive API documentation:
+The ASP.NET Core backend auto-generates interactive API documentation via Swagger UI:
 
-- **Swagger UI** — http://localhost:8000/docs
-- **ReDoc** — http://localhost:8000/redoc
+- **Swagger UI** — http://localhost:5000/swagger
 
 ### Main API Groups
 
@@ -137,32 +126,32 @@ The FastAPI backend auto-generates interactive API documentation:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Docker Compose                           │
-│                                                                 │
-│  ┌───────────────┐        ┌──────────────────────────────────┐  │
-│  │   Frontend    │        │           Backend                │  │
-│  │  React/Vite   │◄──────►│          FastAPI                 │  │
-│  │  :5173        │  HTTP  │          :8000                   │  │
-│  └───────────────┘        └──────┬───────────────────────────┘  │
-│                                  │                              │
-│                     ┌────────────┼────────────┐                 │
-│                     ▼            ▼            ▼                 │
-│              ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│              │  MySQL   │ │  Redis   │ │  Celery  │            │
-│              │  8.0     │ │  7       │ │  Worker  │            │
-│              │  :3306   │ │  :6379   │ │  + Beat  │            │
-│              └──────────┘ └──────────┘ └──────────┘            │
-│                                                                 │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ External Services
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-       ┌────────────┐ ┌─────────┐ ┌─────────┐
-       │  Google    │ │   AWS   │ │Anthropic│
-       │  Drive /   │ │   S3    │ │ Claude  │
-       │  Calendar  │ │         │ │   AI    │
-       └────────────┘ └─────────┘ └─────────┘
++------------------------------------------------------------------+
+|                        Docker Compose                            |
+|                                                                  |
+|  +----------------+        +--------------------------------+    |
+|  |   Frontend     |        |          Backend               |    |
+|  |  Angular 17    +<-------> ASP.NET Core Web API (.NET 8)  |    |
+|  |  Nginx :4200   |  HTTP  |          :5000                 |    |
+|  +----------------+        +----------+---------------------+    |
+|                                       |                          |
+|                            +----------+                          |
+|                            v                                     |
+|                     +-----------+                                |
+|                     |  MySQL    |                                |
+|                     |  8.0      |                                |
+|                     |  :3306    |                                |
+|                     +-----------+                                |
+|                                                                  |
++-----------------------------+------------------------------------+
+                              | External Services
+             +----------------+--------------+
+             v                v              v
+      +------------+   +---------+   +---------+
+      |  Google    |   |   AWS   |   |Anthropic|
+      |  Drive /   |   |   S3    |   | Claude  |
+      |  Calendar  |   |         |   |   AI    |
+      +------------+   +---------+   +---------+
 ```
 
 ---
@@ -172,16 +161,10 @@ The FastAPI backend auto-generates interactive API documentation:
 - **View logs for a specific service:**
   ```bash
   docker-compose logs -f backend
-  docker-compose logs -f celery
+  docker-compose logs -f frontend
   ```
 
-- **Create a new Alembic migration after model changes:**
-  ```bash
-  docker exec hire_genius_backend alembic revision --autogenerate -m "describe_your_change"
-  docker exec hire_genius_backend alembic upgrade head
-  ```
-
-- **Restart only the backend (after code changes without hot-reload):**
+- **Restart only the backend:**
   ```bash
   docker-compose restart backend
   ```
@@ -189,8 +172,17 @@ The FastAPI backend auto-generates interactive API documentation:
 - **Reset the database (destructive):**
   ```bash
   docker-compose down -v
-  docker-compose up -d db
-  docker exec hire_genius_backend alembic upgrade head
+  docker-compose up --build
+  ```
+
+- **Access the MySQL shell:**
+  ```bash
+  docker exec -it hire_genius_mysql mysql -u hgenius -phgenius_pass hire_genius
+  ```
+
+- **Open a shell in the backend container:**
+  ```bash
+  docker exec -it hire_genius_backend bash
   ```
 
 ---

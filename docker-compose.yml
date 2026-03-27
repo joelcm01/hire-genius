@@ -1,89 +1,71 @@
-version: '3.8'
+version: '3.9'
 
 services:
-  db:
+  mysql:
     image: mysql:8.0
-    container_name: hire_genius_db
+    container_name: hire_genius_mysql
     environment:
       MYSQL_ROOT_PASSWORD: root_password
       MYSQL_DATABASE: hire_genius
-      MYSQL_USER: hire_user
-      MYSQL_PASSWORD: hire_password
+      MYSQL_USER: hgenius
+      MYSQL_PASSWORD: hgenius_pass
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    container_name: hire_genius_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hire_genius_net
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: hire_genius_backend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=Server=mysql;Port=3306;Database=hire_genius;Uid=hgenius;Pwd=hgenius_pass;CharSet=utf8mb4;
+      - AWS__AccessKeyId=${AWS_ACCESS_KEY_ID:-}
+      - AWS__SecretAccessKey=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS__Region=${AWS_REGION:-us-east-1}
+      - AWS__BucketName=${S3_BUCKET_NAME:-hire-genius-cvs}
+      - Google__ClientId=${GOOGLE_CLIENT_ID:-}
+      - Google__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
+      - Google__RedirectUri=http://localhost:5000/api/gdrive/auth-callback
+      - Anthropic__ApiKey=${ANTHROPIC_API_KEY:-}
+      - Anthropic__Model=claude-opus-4-6
     ports:
-      - "8000:8000"
-    env_file: .env
-    environment:
-      - DATABASE_URL=mysql+pymysql://hire_user:hire_password@db:3306/hire_genius
-      - REDIS_URL=redis://redis:6379/0
-    volumes:
-      - ./backend:/app
+      - "5000:5000"
     depends_on:
-      db:
+      mysql:
         condition: service_healthy
-      redis:
-        condition: service_started
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  celery:
-    build: ./backend
-    container_name: hire_genius_celery
-    env_file: .env
-    environment:
-      - DATABASE_URL=mysql+pymysql://hire_user:hire_password@db:3306/hire_genius
-      - REDIS_URL=redis://redis:6379/0
+    networks:
+      - hire_genius_net
     volumes:
-      - ./backend:/app
-    depends_on:
-      - backend
-      - redis
-    command: celery -A app.celery_app worker --loglevel=info
-
-  celery-beat:
-    build: ./backend
-    container_name: hire_genius_celery_beat
-    env_file: .env
-    environment:
-      - DATABASE_URL=mysql+pymysql://hire_user:hire_password@db:3306/hire_genius
-      - REDIS_URL=redis://redis:6379/0
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - celery
-    command: celery -A app.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+      - ./backend:/app/src:ro
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: hire_genius_frontend
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "4200:80"
     depends_on:
       - backend
-    environment:
-      - VITE_API_URL=http://localhost:8000/api
+    networks:
+      - hire_genius_net
 
 volumes:
   mysql_data:
-  redis_data:
+
+networks:
+  hire_genius_net:
+    driver: bridge
